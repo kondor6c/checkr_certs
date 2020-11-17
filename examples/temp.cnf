@@ -1,0 +1,34 @@
+[ req ]
+distinguished_name     = req_distinguished_name
+req_extensions         = server_req_extensions
+prompt                 = no
+
+[ req_distinguished_name ]
+C                      = us  # Only 2 characters
+ST                     = az    # Only 2 characters
+L                      = example
+O                      = testing
+OU                     = testing1
+CN                     = example.com
+emailAddress           = root@example.com
+
+####################################################################
+[ server_req_extensions ]
+
+keyUsage                    = critical, digitalSignature, keyEncipherment
+subjectAltName              = @alternate_names
+basicConstraints            = CA:FALSE
+
+####################################################################
+[ alternate_names ]
+
+DNS.1  = address1.example.com
+DNS.2  = address2.example.com
+DNS.3  = address3.example.com
+DNS.4  = address4.example.com
+
+## Standard Spring Cloud Services domains
+# DNS.1  = *.sys.<domain>
+# DNS.2  = *.apps.<domain>
+# DNS.3  = *.login.sys.<domain>
+# DNS.4  = *.uaa.sys.<domain>

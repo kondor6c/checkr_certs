@@ -1,0 +1,36 @@
+{
+    "CN": "example.com",
+    "role": "server/ca/key/csr",
+    "duration": "time",
+    "hash": "sha1",
+    "encoding": "pem/pkcs12",
+    "hosts": [],
+    "key": {
+        "algorithm": "rsa",
+        "strength": 2048,
+        "pem": "optional",
+        "sum": "",
+        "usage": "client/data/server/email"
+    },
+    "issuer": {
+        "name": "name-link-to-issuing-CA_ex:self,generate-self-or-pemchain?",
+        "sum": "",
+        "pem": "optional"
+    },
+    "payload": {
+        "comment": "discarded",
+        "sum": "",
+        "encoding": "lzma",
+        "data": "...."
+    },
+    "names": [
+        {
+            "C":  "US",
+            "L":  "Washington DC",
+            "O":  "Internet Widgets, Inc.",
+            "OU": "WWW",
+            "ST": "None"
+        }
+    ]
+}
+

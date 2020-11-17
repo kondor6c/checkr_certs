@@ -1,0 +1,37 @@
+{
+  "$id": "https://example.com/person.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "certificate",
+  "type": "object",
+  "definitions": {
+  },
+  "properties": {
+    "not_after": {
+      "type": "string",
+      "format": "date-time",
+      "description": "expiration of the certificate"
+    },
+    "not_before": {
+      "type": "string",
+      "format": "date-time",
+      "description": "The date that validity of the certificate begins"
+    },
+    "pem": {
+      "description": "Raw PEM formatted block either from the original request or resulting product from a request",
+      "type": "string",
+      "pattern": "^(-+BEGIN [A-Z]+-+)(.*?)(-+END [A-Z]+-+)$",
+      "minimum": 0
+    },
+    "sans": {
+      "description": "Alternative Names, v3 extension",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "sigalg": {
+      "type": "string",
+      "description": "Hash Digest followed by format of the key"
+    }
+  }
+}
