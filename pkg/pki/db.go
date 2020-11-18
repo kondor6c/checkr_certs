@@ -87,28 +87,28 @@ func Init() { //seriously need to look at this again, what a mess trying to get 
 	} else {
 		db, dberr = sqlx.Connect("mysql", dbUser+":"+dbPass+"@tcp("+dbHost+")/multicheck"+"?"+opts)
 		log.Printf("hit %v", string("database table insert"))
-		Catcher(dberr)
+		Catcher(dberr, 10003, "failed to connect to the database")
 	}
 	_, aerr := db.Exec(table_meta)
-	Catcher(aerr)
+	Catcher(aerr, 100004, "Failed to insert metadata table")
 	_, berr := db.Exec(table_key)
-	Catcher(berr)
+	Catcher(berr, 100005, "Failed to insert private key table")
 	_, cerr := db.Exec(table_issuer)
-	Catcher(cerr)
+	Catcher(cerr, 100006, "Failed to insert issuer table")
 	_, derr := db.Exec(table_pem_store)
-	Catcher(derr)
+	Catcher(derr, 100007, "Failed to insert pem storage table")
 	_, eerr := db.Exec(table_pub_cert)
-	Catcher(eerr)
+	Catcher(eerr, 100008, "Failed to insert public certificate table")
 	_, ferr := db.Exec(table_staple)
-	Catcher(ferr)
+	Catcher(ferr, 100009, "Failed to insert stapled cert table")
 
 }
 
-func certLookup(query fullCert) []fullCert {
+func certLookup(query FullCert) []FullCert {
 	// I wanted to accept an x509.Certificate and log it, but I would need to re-convert (thus do more work) many fields like the sha1
 	var lerr error
 	var look *sqlx.Rows
-	var certResults = []fullCert{}
+	var certResults = []FullCert{}
 	if len(query.Signature) > 0 {
 		look, lerr = db.Queryx("SELECT common_name, serial_number, key_fp, country, organization, organizational_unit, locality, province, street_address, postal_code, not_before, not_after, signature, signature_algorithm, keyUsage, alt_names, subject_key_id, authority_key_id, nonstandard FROM pub_certs WHERE signature=?", query.Signature)
 
@@ -132,9 +132,9 @@ func certLookup(query fullCert) []fullCert {
 		log.Printf("No search criteria")
 	}
 
-	Catcher(lerr)
+	Catcher(lerr, 100012, "could not query the database")
 	for look.Next() {
-		c := &fullCert{}
+		c := &FullCert{}
 		look.StructScan(c)
 		certResults = append(certResults, *c)
 	}
@@ -150,13 +150,13 @@ func recordRemoteCert(fCert x509.Certificate, uri remoteURI) {
 	var count int
 	//var insert_cert = "INSERT INTO pub_certs (host_name, common_name, serial_number, key_fp, country, organization, organizational_unit, locality, province, street_address, postal_code, not_before, not_after, signature, signature_algorithm, keyUsage, sans, subject_key_id, authority_key_id, nonstandard,meta_tx) VALUES(?,?,?,(SELECT public_fp FROM keys WHERE public_fp = ?),?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?)"
 	metaResult, err := db.Exec(insert_meta, uri.Host, uri.Port, uri.Protocol, "api-user", "", "", 0)
-	Catcher(err)
+	Catcher(err, 10005, "internal error when trying to record the certificate, this should be ignored by the end user")
 	pubCert := parseCert(fCert)
 	db.QueryRowx("SELECT COUNT(*) FROM public_certificate WHERE signature = ?", pubCert.Signature).Scan(&count)
 	if metaID, err := metaResult.LastInsertId(); metaID >= 1 && err == nil && count <= 0 {
 		var issuerCount int
 		type insertCert struct {
-			tempCert fullCert `db:""`
+			tempCert FullCert `db:""`
 			metaTX   int64    `db:"metaID"`
 			parentCA string   `db:"p_aki"`
 			issuer   LiteCert `db:""`
@@ -165,16 +165,17 @@ func recordRemoteCert(fCert x509.Certificate, uri remoteURI) {
 			db.QueryRowx("SELECT COUNT(*) FROM issuer WHERE public_fp = ?", pubCert.Extensions.AKI).Scan(&issuerCount)
 			if issuerCount >= 1 {
 				_, err := ins.NamedExec("INSERT INTO issuer (common_name, serial_number, country, organization, organizational_unit, locality, province, street_address, postal_code, key_fp, partial, meta_tx) VALUES(:common_name, :serial_number, :country, :organization, :organizational_unit, :locality, :province, :street_address, :postal_code, :public_fp, :partial,:metaID)", insertCert{issuer: LiteCert{Name: pubCert.Issuer.Name}, parentCA: pubCert.Extensions.AKI, metaTX: metaID})
-				Catcher(err)
+				Catcher(err, 10006, "internal error when trying to record the certificate, this should be ignored by the end user")
 			}
 		}
 		ins.Exec(insert_key, pubCert.Key.PublicFP, pubCert.Key.Strength, pubCert.Key.PEM, pubCert.Key.KeyRole, pubCert.Key.FPdigest, pubCert.Key.Algorithm, metaID)
 
 		//ins.Exec("SELECT meta_tx FROM public_keys WHERE public_fp = :public_fp", pubCert.Key.FPdigest)
 		_, err := ins.NamedExec("INSERT INTO public_certificate (common_name, serial_number, country, organization, organizational_unit, locality, province, street_address, postal_code, key_fp, not_before, not_after, signature, signature_algorithm, keyUsage, alt_names, subject_key_id, authority_key_id, non_standard) VALUES(:common_name, :serial_number, :country, :organization, :organizational_unit, :locality, :province, :street_address, :postal_code,:public_fp, :not_before, :not_after, :signature, :signature_algorithm, :key_role, :alt_names, :subject_key_id, :authority_key_id, :non_standard_data)", pubCert)
-		Catcher(err)
+		Catcher(err, 10007, "internal error when trying to record the certificate, this should be ignored by the end user")
 		dberr := ins.Commit()
 		if dberr != nil {
+			Catcher(dberr, 10008, "internal error when trying to record the certificate, this should be ignored by the end user")
 			ins.Rollback()
 		}
 	} else {
@@ -193,7 +194,7 @@ func recordIssuer(caSent []*x509.Certificate) {
 				db.QueryRowx("SELECT COUNT(*) FROM issuer WHERE public_fp = ?", caCert.Extensions.AKI).Scan(&issuerCount)
 				if issuerCount >= 1 {
 					_, err := db.NamedExec("INSERT INTO issuer (common_name, serial_number, country, organization, organizational_unit, locality, province, street_address, postal_code, key_fp ) VALUES(:common_name, :serial_number, :country, :organization, :organizational_unit, :locality, :province, :street_address, :postal_code, :fingerprint)", caCert)
-					Catcher(err)
+					Catcher(err, 10009, "internal error when trying to record the CA, this should be ignored by the end user")
 				}
 			}
 		}

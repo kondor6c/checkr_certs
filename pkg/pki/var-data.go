@@ -19,8 +19,27 @@ type PrivateData struct { //TODO make this an interface!
 
 	options ConfigStore
 }
+type jsonInquiry struct {
+	Service  string `json:"service,omitempty"  db:"service"`
+	Type     string `json:"type,omitempty"  db:"type"`
+	Category string `json:"category,omitempty"  db:"category"`
+	Port     int    `json:"port,omitempty"  db:"port"`
+	Tls      bool   `json:"tls,omitempty"  db:"tls"`
+	Ipv6     bool   `json:"ipv6,omitempty"  db:"ipv6"`
+	Protocol string `json:"protocol,omitempty"  db:"protocol"`
+	Hostname string `json:"hostname,omitempty"  db:"hostname"`
+}
 
-var debugSet = false
+type NamedError struct {
+	Result    interface{}
+	Code      int // exit code place for looking up what happened and where. This is critical to presenting the type of errors, did the server timeout, was the cert not trusted?
+	PlaceText string
+	Force     bool // try to force continue
+	Err       error
+}
+
+var DebugSet = false
+var ForceError = false
 
 type privKey interface {
 	regularKey() crypto.PrivateKey
@@ -83,14 +102,14 @@ type LiteCert struct {
 	metaLink      authID   `json:"link_to_identity,omitempty" db:"db_id"`
 }
 
-type fullOutput struct {
-	Certs     []fullCert  `json:"certs"`
+type FullOutput struct {
+	Certs     []FullCert  `json:"certs"`
 	Keys      []jKey      `json:"keys"`
 	CertAuths []LiteCert  `json:"authorities"`
 	Meta      interface{} `json:"meta_info"`
 }
 
-type fullCert struct {
+type FullCert struct {
 	Subject            CertName   `json:"subject,omitempty" db:""`
 	Issuer             LiteCert   `json:"issuer" db:"issuer"`
 	SerialNumber       string     `json:"serial_number,omitempty" db:"serial_number"`

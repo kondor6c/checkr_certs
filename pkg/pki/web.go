@@ -77,12 +77,8 @@ func (p *PrivateData) formHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *PrivateData) FetchHandler(w http.ResponseWriter, r *http.Request) {
-	var err error
-	rCert, err := fetchRemoteCert("tcp", r.FormValue("rAddress"), r.FormValue("rPort"))
+	rCert := fetchRemoteCert("tcp", r.FormValue("rAddress"), r.FormValue("rPort"))
 
-	if err != nil {
-		log.Println("unable to get remote certificate")
-	}
 	//verifiedRemoteChain := getChain(rCert)
 	p.cert = *rCert[0] //dereference
 	log.Printf("Fetched remote %s \n", r.FormValue("rAddress"))
