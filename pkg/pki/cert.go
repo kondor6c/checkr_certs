@@ -34,8 +34,8 @@ func Catcher(err error, location int, description string) {
 	}
 }
 
-// getPublicKeyDigest: returns RSA public key modulus MD5 hash. TODO: support other key types
-func getPublicKeyDigest(pkey rsa.PublicKey) string {
+// GetPublicKeyDigest: returns RSA public key modulus MD5 hash. TODO: support other key types
+func GetPublicKeyDigest(pkey rsa.PublicKey) string {
 	hexString := fmt.Sprintf("%X", pkey.N)
 	md5sum := sha1.New()
 	num, err := md5sum.Write([]byte(hexString))
@@ -279,65 +279,6 @@ func SignatureString(alg x509.SignatureAlgorithm) string {
 	}
 }
 
-/*
-func gatherOpts() configStore {
-	/* option ideas: output format (ie json, text, template),
-	   check inputs (check key belongs to cert if both passed otherwise just check cert, or check rsa pubkey),
-	   env read from env vars,
-	   AIO cert, ca chain, and key are all in one file/env
-	opt := &configStore{}
-	//optMap := make(map[string]string)
-	//flag := flag.NewFlagSet("output", flag.ContinueOnError)
-	flag.StringVar(&opt.CertIn, "cert-in", "None", "certificate input source")
-	flag.StringVar(&opt.CaIn, "ca-in", "None", "issuing certificate authority for cert")
-	flag.StringVar(&opt.KeyIn, "key-in", "None", "key input source")
-	flag.StringVar(&opt.ActionPrimary, "action", "None", "Primary action")
-	flag.StringVar(&opt.ActionSecondary, "subAction", "None", "Secondary action")
-	flag.StringVar(&opt.CertIn, "key-out", "None", "certificate")
-	flag.StringVar(&opt.KeyOut, "ca-out", "None", "issuing certificate authority for cert")
-	flag.StringVar(&opt.CertOut, "cert-out", "None", "key for certificate")
-	//flagSet.Var(&optMap["List"], "None", "list of options to pass delimiter ',' [not implemented]")
-	flag.StringVar(&opt.CaOut, "CA-out", "None", "action to take")
-	flag.Parse()
-	if DebugSet == true {
-		log.Printf("obtained arguments: %s", os.Args)
-	}
-	if flag.NFlag() < 1 && os.Stdin == nil {
-		flag.PrintDefaults()
-	}
-	return *opt
-}
-func main() {
-	var optCertIn string
-	opts := gatherOpts()
-	dat := decideRoute(opts)
-	dbinit()
-	if opts.ActionSecondary == "debug" {
-		DebugSet = true
-	}
-	if opts.ActionPrimary == "web-ui" || opts.ActionPrimary == "web-server" {
-		mux := http.NewServeMux()
-		mux.HandleFunc("/", dat.mainHandler)
-		mux.HandleFunc("/add", dat.addHandler)
-		mux.HandleFunc("/view", dat.viewHandler)
-		mux.HandleFunc("/view/ical", dat.icalHandler)
-		mux.HandleFunc("/view/cert", dat.servePemHandler)
-		mux.HandleFunc("/view/csr", dat.servePemHandler)
-		mux.HandleFunc("/view/key", dat.servePemHandler)
-		mux.HandleFunc("/api", dat.respondJSONHandler)
-		mux.HandleFunc("/api/cert", dat.x509CertHandler)
-		mux.HandleFunc("/api/cert/remote", dat.remoteURLHandler)
-		mux.HandleFunc("/api/key", dat.privateKeyHandler)
-		mux.HandleFunc("/edit", dat.editHandler)
-		mux.HandleFunc("/fetch", dat.fetchHandler)
-		http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
-		log.Fatal(http.ListenAndServe(":5000", mux))
-	}
-	fmt.Println(optCertIn)
-	parseCert(dat.cert)
-}
-*/
-
 func (c *CertName) convertPKIX() *pkix.Name {
 	rName := &pkix.Name{
 		Country:            []string{c.Country},
@@ -421,7 +362,7 @@ func resultingKey(pk interface{}) jKey { //TODO support multiple key types like 
 		rKey.Algorithm = "rsa"
 	case *rsa.PublicKey:
 		rKey.Algorithm = "rsa"
-		rKey.PublicFP = getPublicKeyDigest(*k)
+		rKey.PublicFP = GetPublicKeyDigest(*k)
 		rKey.PEM = string(toPem(*k))
 		rKey.Strength = strconv.Itoa(k.N.BitLen())
 	case *ecdsa.PublicKey:

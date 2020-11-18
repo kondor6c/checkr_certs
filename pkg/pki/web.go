@@ -41,14 +41,14 @@ func (p *PrivateData) ViewHandler(w http.ResponseWriter, r *http.Request) {
 	// var htmlColor string
 	if p.cert.Signature != nil {
 		publicKey = p.cert.PublicKey.(*rsa.PublicKey)
-		keyDigest := getPublicKeyDigest(*publicKey)
+		keyDigest := GetPublicKeyDigest(*publicKey)
 		certRow := fmt.Sprintf("<TR><TD><A HREF='/edit'>%s</A></TD><TD>%s</TD><TD>%s</TD><TD>%s</TD><TD>%s</TD><TD>%s</TD><TD>%s</TD><TD><A HREF='/view/ical'>%s</A></TD><TD>%s</TD></TR>\n</TABLE>", p.cert.Subject.CommonName, p.cert.Subject.Locality, p.cert.Subject.Organization, p.cert.Subject.OrganizationalUnit, p.cert.Subject.ExtraNames, p.cert.Issuer, p.cert.DNSNames, p.cert.NotAfter, keyDigest)
 		pageBody = fmt.Sprintf("%s\n%s\n%s\n", pageBody, web.CertView, certRow)
 	}
 	if p.key != nil {
 		privKey := p.key.(*rsa.PrivateKey)
-		privKeyDigest := getPublicKeyDigest(privKey.PublicKey)
-		if privKeyDigest == getPublicKeyDigest(certPubKey) {
+		privKeyDigest := GetPublicKeyDigest(privKey.PublicKey)
+		if privKeyDigest == GetPublicKeyDigest(certPubKey) {
 			htmlColor = "green"
 		}
 

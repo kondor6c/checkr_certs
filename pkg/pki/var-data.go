@@ -19,7 +19,7 @@ type PrivateData struct { //TODO make this an interface!
 
 	options ConfigStore
 }
-type jsonInquiry struct {
+type JsonInquiry struct {
 	Service  string `json:"service,omitempty"  db:"service"`
 	Type     string `json:"type,omitempty"  db:"type"`
 	Category string `json:"category,omitempty"  db:"category"`
@@ -28,6 +28,11 @@ type jsonInquiry struct {
 	Ipv6     bool   `json:"ipv6,omitempty"  db:"ipv6"`
 	Protocol string `json:"protocol,omitempty"  db:"protocol"`
 	Hostname string `json:"hostname,omitempty"  db:"hostname"`
+}
+type remoteURI struct {
+	Host     string `json:"host" db:"remote_host"`
+	Port     int    `json:"port" db:"remote_port"`
+	Protocol string `json:"protocol" db:"remote_protocol"`
 }
 
 type NamedError struct {
@@ -88,11 +93,6 @@ type authID struct {
 	Name    string
 	Id      string
 	SigHash []byte
-}
-type remoteURI struct {
-	Host     string `json:"host" db:"remote_host"`
-	Port     int    `json:"port" db:"remote_port"`
-	Protocol string `json:"protocol" db:"remote_protocol"`
 }
 
 type LiteCert struct {

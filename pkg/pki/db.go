@@ -142,14 +142,14 @@ func certLookup(query FullCert) []FullCert {
 	return certResults
 }
 
-func recordRemoteCert(fCert x509.Certificate, uri remoteURI) {
+func recordRemoteCert(fCert x509.Certificate, request JsonInquiry) {
 	// I wanted to accept an x509.Certificate and log it, but I would need to re-convert (thus do more work) many fields like the sha1
 	ins := db.MustBegin()
 	var insert_meta = "INSERT INTO meta_info (host_name, port_number, protocol, source_agent, tags, trust_parent, no_record) VALUES (?,?,?,?,?,?,?);"
 	var insert_key = "INSERT INTO public_keys (public_fp, strength, pem, key_usage, fp_hash_type, algorithm,  meta_tx ) VALUES (?,?,?,?,?,?,?);"
 	var count int
 	//var insert_cert = "INSERT INTO pub_certs (host_name, common_name, serial_number, key_fp, country, organization, organizational_unit, locality, province, street_address, postal_code, not_before, not_after, signature, signature_algorithm, keyUsage, sans, subject_key_id, authority_key_id, nonstandard,meta_tx) VALUES(?,?,?,(SELECT public_fp FROM keys WHERE public_fp = ?),?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?,?)"
-	metaResult, err := db.Exec(insert_meta, uri.Host, uri.Port, uri.Protocol, "api-user", "", "", 0)
+	metaResult, err := db.Exec(insert_meta, request.Hostname, request.Port, request.Protocol, "api-user", "", "", 0)
 	Catcher(err, 10005, "internal error when trying to record the certificate, this should be ignored by the end user")
 	pubCert := parseCert(fCert)
 	db.QueryRowx("SELECT COUNT(*) FROM public_certificate WHERE signature = ?", pubCert.Signature).Scan(&count)
