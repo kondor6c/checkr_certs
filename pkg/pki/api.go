@@ -44,8 +44,7 @@ func (p *PrivateData) RemoteURLHandler(w http.ResponseWriter, r *http.Request) {
 	strPort := strconv.Itoa(remoteLocation.Port)
 	log.Printf("host %v   port %v", remoteLocation.Host, strPort)
 
-	rCert, err := fetchRemoteCert(remoteLocation.Protocol, remoteLocation.Host, strPort)
-	Catcher(err)
+	rCert := fetchRemoteCert(remoteLocation.Protocol, remoteLocation.Host, strPort)
 	//verifiedRemoteChain := getChain(rCert)
 	p.cert = *rCert[0] //dereference
 	jsonOutput := createOutput(p.cert)
@@ -55,6 +54,8 @@ func (p *PrivateData) RemoteURLHandler(w http.ResponseWriter, r *http.Request) {
 		go recordIssuer(rCert) // This would be nice to make concurrent!!
 	}
 	recordRemoteCert(p.cert, remoteLocation)
+	//Catcher(err, 10008, "error from our custom written function to fetch remote certificates")
+
 	log.Printf("Fetched remote %s and returned JSON \n", remoteLocation.Host)
 
 }
@@ -63,7 +64,7 @@ func (p *PrivateData) RemoteCertIndex(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Credentials", "true")
 	log.Printf("we got: %v", r.Body)
-	qCert := &fullCert{} //a query for a certificate
+	qCert := &FullCert{} //a query for a certificate
 	if err := json.NewDecoder(r.Body).Decode(&qCert); err != nil {
 		log.Println("error at json, TODO correctly handle this! ")
 		WebCatcher(w, err)

@@ -7,7 +7,6 @@ import (
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
-	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha1"
 	"crypto/tls"
@@ -17,7 +16,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -25,16 +23,14 @@ import (
 	"os"
 	"strconv"
 	"strings"
-
-	_ "github.com/go-sql-driver/mysql"
 )
 
-var DebugSet = false
-
 // Catcher : Generic Catch all, better than just discarding errors
-func Catcher(err error) {
+func Catcher(err error, location int, description string) {
 	if err != nil {
 		log.Fatal(err)
+		log.Println(location)
+		log.Println(description)
 	}
 }
 
@@ -42,45 +38,58 @@ func Catcher(err error) {
 func getPublicKeyDigest(pkey rsa.PublicKey) string {
 	hexString := fmt.Sprintf("%X", pkey.N)
 	md5sum := sha1.New()
-	md5sum.Write([]byte(hexString))
+	num, err := md5sum.Write([]byte(hexString))
+	if err != nil || num == 0 {
+		Catcher(err, 344, "could not obtain and write SHA digest of public key OR 0 bytes were written (odd)")
+	}
 	digest := fmt.Sprintf("%x\n", sha1.Sum(nil))
 	return digest
 }
 
 // fetchRemoteCert: try to remotely pull a certificate. This would be useful for private or secure environments where you want to copy what is existing and make a new CSR
-func fetchRemoteCert(proto string, cHost string, cPort string) ([]*x509.Certificate, error) { //TODO offer SOCKS and remote resolution (dialer), since Golang already supports HTTP_PROXY?
-	config := tls.Config{InsecureSkipVerify: true}
-	conn, err := tls.Dial(proto, cHost+":"+cPort, &config)
-	var rerr error
-	//var sentCertificate []x509.Certificate
-	if err != nil {
-		log.Println(err)
-		rerr = errors.New("An error occurred while trying to remotely fetch the certificate")
+func fetchRemoteCert(proto string, cHost string, cPort string) []*x509.Certificate { //TODO offer SOCKS and remote resolution (dialer), since Golang already supports HTTP_PROXY?
+	var keylog io.Writer
+	var keylogErr error
+	if DebugSet == true {
+		keylog, keylogErr = os.Open("/tmp/checkr_certs")
+	} else {
+		keylog, keylogErr = os.Open("/dev/null")
 	}
-	defer conn.Close()
+	Catcher(keylogErr, 10013, "could not open NSS TLS Key logging location, for debugging and decrypting TLS")
+	config := tls.Config{KeyLogWriter: keylog, InsecureSkipVerify: true}
+	conn, err := tls.Dial(proto, cHost+":"+cPort, &config)
+	//var sentCertificate []x509.Certificate
+	Catcher(err, 566, "An error occurred early while trying to remotely fetch the certificate, could be an incorrect hostname, or a firewall")
+	defer func() {
+		err := conn.Close()
+		Catcher(err, 567, "An error occcured while trying to obtain the remote certificate around close, this could be normal or even desired")
+	}()
 	log.Println("client: connected to: ", conn.RemoteAddr())
 	state := conn.ConnectionState()
 	// reflect.ValueOf(state).Interface().(newType)
-	return state.PeerCertificates, rerr
+	return state.PeerCertificates
 }
 
 func (p *PrivateData) addPem(dataPem *pem.Block) {
 	if dataPem.Type == "RSA PRIVATE KEY" || dataPem.Type == "PRIVATE KEY" {
 		key, err := x509.ParsePKCS1PrivateKey(dataPem.Bytes)
-		if err != nil {
+		Catcher(err, 310, "common, unable to parse the RSA private key from the provided PEM file")
+		if err != nil || ForceError == true {
 			pkcs8, err := x509.ParsePKCS8PrivateKey(dataPem.Bytes)
-			Catcher(err)
+			Catcher(err, 312, "common, unable to parse the PKCS8 Private Key from the provided PEM file")
 			p.key = pkcs8.(*crypto.PrivateKey) // hmm
 		} else {
 			p.key = key
 		}
 	} else if dataPem.Type == "EC PRIVATE KEY" {
-		if key, err := x509.ParseECPrivateKey(dataPem.Bytes); err == nil {
+		key, err := x509.ParseECPrivateKey(dataPem.Bytes)
+		Catcher(err, 313, "common, unable to parse a certificate from the provided PEM file")
+		if err == nil || ForceError == true {
 			p.key = key
 		}
 	} else if dataPem.Type == "CERTIFICATE" {
 		pemCert, err := x509.ParseCertificate(dataPem.Bytes)
-		Catcher(err)
+		Catcher(err, 319, "common, unable to parse a certificate from the provided PEM file")
 		p.cert = *pemCert
 	} else {
 		log.Println("unsupported ") //TODO return error
@@ -112,7 +121,7 @@ func toPem(crypt interface{}) []byte {
 	case rsa.PublicKey:
 		byteData, err = asn1.Marshal(t)
 		//Should NOT be hit, because the cert should only have valid data, I don't know how it couldn't be valid
-		Catcher(err)
+		Catcher(err, 801, "error occurred when trying to encode the RSA Public Key to ASN1 data, while trying to encode to PEM")
 		pemType = "RSA PUBLIC KEY"
 	case x509.CertificateRequest:
 		if t.Signature != nil {
@@ -126,24 +135,9 @@ func toPem(crypt interface{}) []byte {
 		}
 	}
 	err = pem.Encode(pemBytes, &pem.Block{Type: pemType, Bytes: byteData})
-	Catcher(err)
+	Catcher(err, 802, "error hit when trying to encode the byes to PEM format")
 
 	return pemBytes.Bytes()
-}
-
-// I don't remember why I had two pkeys, I think the independent function is newer and better
-func (p *PrivateData) pkey() crypto.Signer {
-	switch c := p.key.(type) {
-	case *rsa.PrivateKey:
-		return interface{}(c).(crypto.Signer)
-	case *ecdsa.PrivateKey:
-		return interface{}(c).(crypto.Signer)
-	/*	case ed25519.PrivateKey:
-		priv := pk.(ed25519.PrivateKey)
-	*/
-	default:
-		return nil
-	}
 }
 
 // pkey: from a private key, get something that we can use to create a new certificate or work with
@@ -166,8 +160,11 @@ func (p *PrivateData) certCreation(requestCert []byte) *x509.Certificate { // TO
 	var err error
 	var signer crypto.Signer
 	devRand, oerr := os.Open("/dev/random")
-	defer devRand.Close()
-	Catcher(oerr)
+	Catcher(oerr, 408, "error when trying to open random device for the private key actions")
+	defer func() {
+		err := devRand.Close()
+		Catcher(err, 10067, "An error occcured while trying to close the random file")
+	}()
 	//if the authority's key is not present then create a self signed
 	signer = p.key.(crypto.Signer)
 	template := &x509.Certificate{
@@ -183,9 +180,9 @@ func (p *PrivateData) certCreation(requestCert []byte) *x509.Certificate { // TO
 		signer = p.auth.key.(crypto.Signer)
 		cert, err = x509.CreateCertificate(devRand, template, &p.auth.ca[0], signer.Public(), signer)
 	}
-	Catcher(err)
+	Catcher(err, 412, "error hit when creating the X509 certificate")
 	checkcert, err := x509.ParseCertificate(cert)
-	Catcher(err)
+	Catcher(err, 413, "error hit when trying to read and parse the certificate we just created, this is unusual")
 	return checkcert
 }
 
@@ -206,16 +203,19 @@ func (p *PrivateData) keyPairReq(csr requestCert) []byte {
 	}
 
 	devRand, oerr := os.Open("/dev/random")
-	Catcher(oerr)
-	defer devRand.Close()
+	Catcher(oerr, 415, "error hit when trying to open a random device so that a signer (to sign a request with the private key) could be created, [BACKEND]")
+	defer func() {
+		err := devRand.Close()
+		Catcher(err, 10067, "An error occcured while trying to close the random file")
+	}()
 	req, genCsrErr := x509.CreateCertificateRequest(devRand, &p.req, p.key)
-	Catcher(genCsrErr)
+	Catcher(genCsrErr, 417, "error hit when trying to create the Certificate request")
 	_, err := x509.ParseCertificateRequest(req) //extra check, just to see if the CSR is correct
-	Catcher(err)
+	Catcher(err, 418, "error hit when trying to Parse the Certificate Siging Request that we _just_ created this is unusual")
 	return req
 }
 
-// SignerAlgo: take public key determine permissible algorithms, attempt user selected algorithm, can be blank
+// SignerAlgo ... take public key determine permissible algorithms, attempt user selected algorithm, can be blank
 func SignerAlgo(pub crypto.PublicKey, tryAlg string) x509.SignatureAlgorithm {
 	var rHash x509.SignatureAlgorithm
 	switch c := pub.(type) {
@@ -247,7 +247,7 @@ func SignerAlgo(pub crypto.PublicKey, tryAlg string) x509.SignatureAlgorithm {
 	return rHash
 }
 
-// SignatureString: sourced from cfssl, translate known signature type to string
+// SignatureString ... sourced from cfssl, translate known signature type to string
 func SignatureString(alg x509.SignatureAlgorithm) string {
 	switch alg {
 	case x509.MD2WithRSA:
@@ -395,17 +395,17 @@ func parseExtensions(c x509.Certificate) Extensions {
 }
 
 // Parse the key portion of the config "Key"
+/*
 func (p *PrivateData) configKey(jk jKey) {
 	if len(jk.PEM) <= 1 {
 		devRand, oerr := os.Open("/dev/random")
-		Catcher(oerr)
+		Catcher(oerr, 414, "an error hit while trying to open a random device file so that keys can be signed")
 		defer devRand.Close()
-		if newKey, err := rsa.GenerateKey(rand.Reader, 4096); err == nil {
-			Catcher(err)
-			p.key = newKey
-		}
+		newKey, err := rsa.GenerateKey(rand.Reader, 4096)
+		Catcher(oerr, 419, "an error hit while trying to create a new private key since we did not see a private key PEM with the request")
 	}
 }
+*/
 
 // resultingKey: takes in any type switch crypto.key{} and parse it
 func resultingKey(pk interface{}) jKey { //TODO support multiple key types like ed25519 and more, should I parse the actual PEM key now and potentially call key creation?
@@ -421,12 +421,9 @@ func resultingKey(pk interface{}) jKey { //TODO support multiple key types like 
 		rKey.Algorithm = "rsa"
 	case *rsa.PublicKey:
 		rKey.Algorithm = "rsa"
-		h := sha1.New()
-		h.Write(k.N.Bytes())
-		hash := h.Sum(nil)
+		rKey.PublicFP = getPublicKeyDigest(*k)
 		rKey.PEM = string(toPem(*k))
 		rKey.Strength = strconv.Itoa(k.N.BitLen())
-		rKey.PublicFP = hex.EncodeToString(hash)
 	case *ecdsa.PublicKey:
 		rKey.KeyRole = "PublicKey"
 		rKey.Algorithm = "ecdsa"
@@ -436,7 +433,10 @@ func resultingKey(pk interface{}) jKey { //TODO support multiple key types like 
 	case ecdsa.PublicKey:
 		rKey.Algorithm = "ecdsa"
 		h := sha1.New()
-		h.Write(k.X.Bytes())
+		num, err := h.Write(k.X.Bytes())
+		if err != nil || num == 0 {
+			Catcher(err, 345, "could not obtain and write SHA digest of public key ECDSA, or 0 bytes were written (odd)")
+		}
 		rKey.Strength = k.Params().Name
 		hash := h.Sum(nil)
 		rKey.PublicFP = hex.EncodeToString(hash)
@@ -445,7 +445,7 @@ func resultingKey(pk interface{}) jKey { //TODO support multiple key types like 
 }
 
 // parseCert: takes an x509 cert and gives an custom annotated data type so that it can be recorded or acted on
-func parseCert(c x509.Certificate) fullCert {
+func parseCert(c x509.Certificate) FullCert {
 	keyVal := resultingKey(c.PublicKey)
 	h := sha1.New()
 	h.Write(c.Signature)
@@ -454,7 +454,7 @@ func parseCert(c x509.Certificate) fullCert {
 	if DebugSet == true {
 		log.Printf("cert's key is: %v", keyVal)
 	}
-	rCert := fullCert{
+	rCert := FullCert{
 		Subject:            parseName(c.Subject), // pkix.Name, country, org, ou, l, p, street, zip, serial, cn, extra... Additional elements in a DN can be added in via ExtraName, <=EMAIL
 		Issuer:             LiteCert{Name: parseName(c.Issuer)},
 		NotAfter:           c.NotAfter,
@@ -471,8 +471,8 @@ func parseCert(c x509.Certificate) fullCert {
 func createOutput(crypt ...interface{}) []byte {
 	var jsonOut []byte
 	var err error
-	cryptObject := &fullOutput{}
-	cryptObject.Certs = make([]fullCert, 0)
+	cryptObject := &FullOutput{}
+	cryptObject.Certs = make([]FullCert, 0)
 
 	for _, i := range crypt {
 		switch t := i.(type) {
@@ -488,11 +488,11 @@ func createOutput(crypt ...interface{}) []byte {
 		}
 	}
 	jsonOut, err = json.Marshal(cryptObject)
-	Catcher(err)
+	Catcher(err, 633, "an error hit while trying to read cryptographic data and create meaningful JSON")
 	return jsonOut
 }
 
-// pemFile : a core function, takes a file returns the decoded PEM
+// PemFile ... a core function, takes a file returns the decoded PEM
 func PemFile(file io.Reader) *pem.Block {
 	bytesAll, _ := ioutil.ReadAll(file)
 	pemContent, rest := pem.Decode(bytesAll)
@@ -518,13 +518,14 @@ func getChain(certs []x509.Certificate) [][]*x509.Certificate {
 		}
 	}
 	verifiedBundle, err := certificate.Verify(compareCert)
-	if err != nil {
+	Catcher(err, 510, "an error hit while trying to Verify the certificate")
+	if err != nil || ForceError == true {
 		log.Println(err)
 		sysRoot, err := x509.SystemCertPool()
-		Catcher(err)
+		Catcher(err, 511, "an error hit while trying to open the Operating System Trust Store")
 		failedChain, err := certificate.Verify(x509.VerifyOptions{Roots: sysRoot})
 		verifiedBundle = failedChain
-		Catcher(err)
+		Catcher(err, 513, "an error hit while trying to Verify the certificate against the chain and the operating system chain")
 	}
 	return verifiedBundle
 }
