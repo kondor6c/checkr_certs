@@ -7,7 +7,7 @@ import (
 )
 
 // This is "secret" data, therefore named private
-type PrivateData struct { //TODO make this an interface!
+type PrivateData struct {
 	key        crypto.PrivateKey
 	cert       x509.Certificate
 	req        x509.CertificateRequest
@@ -19,6 +19,7 @@ type PrivateData struct { //TODO make this an interface!
 
 	options ConfigStore
 }
+
 type JsonInquiry struct {
 	Service  string `json:"service,omitempty"  db:"service"`
 	Type     string `json:"type,omitempty"  db:"type"`
@@ -28,7 +29,9 @@ type JsonInquiry struct {
 	Ipv6     bool   `json:"ipv6,omitempty"  db:"ipv6"`
 	Protocol string `json:"protocol,omitempty"  db:"protocol"`
 	Hostname string `json:"hostname,omitempty"  db:"hostname"`
+	Options  string `json:"options,omitempty" db:"opts"`
 }
+
 type remoteURI struct {
 	Host     string `json:"host" db:"remote_host"`
 	Port     int    `json:"port" db:"remote_port"`
@@ -36,11 +39,12 @@ type remoteURI struct {
 }
 
 type NamedError struct {
-	Result    interface{}
-	Code      int // exit code place for looking up what happened and where. This is critical to presenting the type of errors, did the server timeout, was the cert not trusted?
-	PlaceText string
-	Force     bool // try to force continue
-	Err       error
+	Result      interface{}
+	Code        int    // exit code place for looking up what happened and where. This is critical to presenting the type of errors, did the server timeout, was the cert not trusted?
+	Description string // our description
+	Location    string // Where was this, x509, http, net, smtp, dns?
+	Force       bool   // try to force continue
+	Err         error
 }
 
 var DebugSet = false
@@ -63,6 +67,7 @@ type user struct {
 	Groups   []string `json:"groups,omitempty" db:"groups"`
 	Password *string  `json:"password,omitempty"  db:"password"`
 }
+
 type CertName struct {
 	CommonName         string `json:"common_name,omitempty" db:"common_name"`
 	SerialNumber       string `json:"serial_number,omitempty" db:"serial_number"`
@@ -82,8 +87,8 @@ type jKey struct {
 	PEM       string `json:"pem" db:"pem"`
 	KeyRole   string `json:"key_role" db:"key_role"`
 	Strength  string `json:"strength" db:"strength"`
-	PublicFP  string `json:"public_signature_fingerprint" db:"public_fp"`
-	FPdigest  string `json:"fingerprint_digest_type" db:"fp_hash_type"`
+	PublicFP  string `json:"public_fingerprint" db:"public_fp"`         // the digest hex *hash* of modulus and exponent (RSA) of the key *hashed* for visibility Renamed from: public_signature_fingerprint
+	FPdigest  string `json:"fingerprint_digest_type" db:"fp_hash_type"` // the digest algorithm used to calculate the publicFP
 	Algorithm string `json:"algorithm" db:"algorithm"`
 }
 
@@ -97,8 +102,8 @@ type authID struct {
 
 type LiteCert struct {
 	Name          CertName `json:"issuing_name,omitempty" db:""`
-	Fingerprint   string   `json:"fingerprint" db:"fingerprint"`
-	SignatureHash string   `json:"fp_hash" db:"fp_hash"`
+	Fingerprint   string   `json:"fingerprint,omitempty" db:"fingerprint"` //
+	SignatureHash string   `json:"fp_hash,omitempty" db:"fp_hash"`         //
 	metaLink      authID   `json:"link_to_identity,omitempty" db:"db_id"`
 }
 

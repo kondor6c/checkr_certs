@@ -9,6 +9,8 @@ import (
 	"crypto/elliptic"
 	"crypto/rsa"
 	"crypto/sha1"
+	"crypto/sha256"
+	"crypto/sha512"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -20,44 +22,150 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+	"net"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
-// Catcher : Generic Catch all, better than just discarding errors
-func Catcher(err error, location int, description string) {
+// Catcher : Generic Catch all, type switch on most errors in the modules we use
+func Catcher(err error, location int, note string) {
+	var description string
+	switch t := err.(type) {
+	case *json.UnsupportedValueError:
+		description = "JSON: bad value"
+		fmt.Printf("JSON: bad value")
+	case *json.UnsupportedTypeError:
+		description = "JSON: bad type"
+		fmt.Println(t)
+	case *net.DNSError:
+		description = "DNS: issue"
+		fmt.Println(t)
+	case *net.UnknownNetworkError:
+		description = "net: issue"
+		fmt.Println(t)
+	case *net.AddrError:
+		description = "IP: Address issue"
+		fmt.Println(t)
+	case *net.InvalidAddrError:
+		description = "IP: Address issue"
+		fmt.Println(t)
+	case *net.ParseError:
+		description = "IP: Address issue"
+		fmt.Println(t)
+	case *net.OpError:
+		description = "Network issue"
+		fmt.Println(t)
+	case *x509.UnknownAuthorityError:
+		description = "x509 unknown issuer, could be normal"
+		fmt.Println(t)
+	case *x509.SystemRootsError:
+		description = "x509 issuer not known to operating system, could be normal"
+		fmt.Println(t)
+	case *net.DNSConfigError:
+		description = "an error reading the machine's DNS configuration. (No longer used; kept for compatibility.)"
+		fmt.Println(t)
+	case *x509.ConstraintViolationError:
+		description = "x509 had an issue with a constraint within the certificate"
+		fmt.Println(t)
+	case *x509.HostnameError:
+		description = "x509 reported an issue with the host name"
+		fmt.Println(t)
+	case *x509.InsecureAlgorithmError:
+		description = "x509 insecure algorithm, this can be retried with force set"
+		fmt.Println(t)
+	case *os.LinkError:
+		description = "os file is a link"
+		fmt.Println(t)
+	case *os.PathError:
+		description = "os file had a path issue, not found or inaccessible"
+		fmt.Println(t)
+	case *tls.RecordHeaderError:
+		description = "TLS header is invalid"
+		fmt.Println(t)
+	case *asn1.SyntaxError:
+		description = "asn1 error with the asn1 data and decoding, likely invalid"
+		fmt.Println(t)
+	case *asn1.StructuralError:
+		description = "asn1 seems vaild, but we cannot decode it properly"
+		fmt.Println(t)
+	case *http.ProtocolError:
+		description = "Deprecated: Not all errors in the http package related to protocol errors are of type ProtocolError."
+		fmt.Println(t)
+	}
 	if err != nil {
-		log.Fatal(err)
-		log.Println(location)
-		log.Println(description)
+		log.Printf("[catcher - cert] ERROR @%d - %s. %s", location, description)
+		log.Panicln(err)
 	}
 }
 
-// GetPublicKeyDigest: returns RSA public key modulus MD5 hash. TODO: support other key types
-func GetPublicKeyDigest(pkey rsa.PublicKey) string {
+// GetPublicKeyDigest: returns RSA public key modulus MD5 hash from modulus and exponent. TODO: support other key types consider renaming to KeyID
+func GetPublicKeyDigest(pkey rsa.PublicKey) []byte {
 	hexString := fmt.Sprintf("%X", pkey.N)
-	md5sum := sha1.New()
-	num, err := md5sum.Write([]byte(hexString))
-	if err != nil || num == 0 {
-		Catcher(err, 344, "could not obtain and write SHA digest of public key OR 0 bytes were written (odd)")
+	hah := hashUsingDigest([]byte(hexString), "sha1")
+	return hah
+}
+
+func hashUsingDigest(payload []byte, hashType string) []byte {
+	sum := make([]byte, 0, 64)
+	s := strings.ToLower(hashType)
+	if s == "md5" {
+	} else if s == "sha1" {
+		h := sha1.New()
+		n, e := h.Write(payload)
+		if e != nil || n == 0 {
+			Catcher(e, 344, "could not obtain and write SHA hashType of public key OR 0 bytes were written (odd)")
+		}
+		digest := sha1.Sum(payload)
+		sum = append(sum, digest[:20]...)
+	} else if s == "sha2" || s == "sha256" {
+		h := sha256.New()
+		n, e := h.Write(payload)
+		if e != nil || n == 0 {
+			Catcher(e, 344, "could not obtain and write SHA hashType of public key OR 0 bytes were written (odd)")
+		}
+		digest := sha256.Sum256(nil)
+		sum = append(sum, digest[:32]...)
+	} else if s == "sha384" {
+		h := sha512.New384()
+		n, e := h.Write(payload)
+		if e != nil || n == 0 {
+			Catcher(e, 344, "could not obtain and write SHA hashType of public key OR 0 bytes were written (odd)")
+		}
+		digest := sha512.Sum512(nil)
+		sum = append(sum, digest[:48]...)
+	} else if s == "sha512" {
+		h := sha512.New()
+		n, e := h.Write(payload)
+		if e != nil || n == 0 {
+			Catcher(e, 344, "could not obtain and write SHA hashType of public key OR 0 bytes were written (odd)")
+		}
+		digest := sha512.Sum512(nil)
+		sum = append(sum, digest[:64]...)
 	}
-	digest := fmt.Sprintf("%x\n", sha1.Sum(nil))
-	return digest
+	return sum
 }
 
 // fetchRemoteCert: try to remotely pull a certificate. This would be useful for private or secure environments where you want to copy what is existing and make a new CSR
 func fetchRemoteCert(proto string, cHost string, cPort string) []*x509.Certificate { //TODO offer SOCKS and remote resolution (dialer), since Golang already supports HTTP_PROXY?
 	var keylog io.Writer
 	var keylogErr error
+	var limit time.Time // to be based on the user profile config
+	var tlsConfig tls.Config
+	var dialControl net.Dialer
+	limit = time.Now().Add(time.Second * 10)
 	if DebugSet == true {
 		keylog, keylogErr = os.Open("/tmp/checkr_certs")
+		tlsConfig = tls.Config{KeyLogWriter: keylog, InsecureSkipVerify: true}
 	} else {
-		keylog, keylogErr = os.Open("/dev/null")
+		tlsConfig = tls.Config{InsecureSkipVerify: true}
 	}
+	dialControl = net.Dialer{Deadline: limit}
 	Catcher(keylogErr, 10013, "could not open NSS TLS Key logging location, for debugging and decrypting TLS")
-	config := tls.Config{KeyLogWriter: keylog, InsecureSkipVerify: true}
-	conn, err := tls.Dial(proto, cHost+":"+cPort, &config)
+	// in go 1.15! conn, err := tls.DialWithDialer(tls.Dialer{dialControl, &tlsConfig}, proto, cHost+":"+cPort)
+	conn, err := tls.DialWithDialer(&dialControl, proto, cHost+":"+cPort, &tlsConfig)
 	//var sentCertificate []x509.Certificate
 	Catcher(err, 566, "An error occurred early while trying to remotely fetch the certificate, could be an incorrect hostname, or a firewall")
 	defer func() {
@@ -274,6 +382,14 @@ func SignatureString(alg x509.SignatureAlgorithm) string {
 		return "ECDSAWithSHA384"
 	case x509.ECDSAWithSHA512:
 		return "ECDSAWithSHA512"
+	case x509.PureEd25519:
+		return "PureEd25519"
+	case x509.SHA256WithRSAPSS:
+		return "SHA256WithRSAPSS"
+	case x509.SHA384WithRSAPSS:
+		return "SHA384WithRSAPSS"
+	case x509.SHA512WithRSAPSS:
+		return "SHA512WithRSAPSS"
 	default:
 		return "Unknown Signature"
 	}
@@ -323,7 +439,6 @@ func parseExtensions(c x509.Certificate) Extensions {
 	/*policy := string(pkix.Extension{
 		Id: policyASN,
 	}.Value) */
-	log.Printf("extension policy: \n")
 	sans = append(sans, c.DNSNames...)
 	e := Extensions{
 		Sans:     sans,
@@ -347,12 +462,11 @@ func (p *PrivateData) configKey(jk jKey) {
 	}
 }
 */
-
 // resultingKey: takes in any type switch crypto.key{} and parse it
 func resultingKey(pk interface{}) jKey { //TODO support multiple key types like ed25519 and more, should I parse the actual PEM key now and potentially call key creation?
 	rKey := jKey{}
 	if DebugSet == true {
-		log.Printf("%T\n", pk)
+		log.Printf("[cert] DEBUG - the crypto key passed: %T\n", pk)
 	}
 	switch k := pk.(type) {
 	case *rsa.PrivateKey:
@@ -362,7 +476,7 @@ func resultingKey(pk interface{}) jKey { //TODO support multiple key types like 
 		rKey.Algorithm = "rsa"
 	case *rsa.PublicKey:
 		rKey.Algorithm = "rsa"
-		rKey.PublicFP = GetPublicKeyDigest(*k)
+		rKey.PublicFP = string(GetPublicKeyDigest(*k))
 		rKey.PEM = string(toPem(*k))
 		rKey.Strength = strconv.Itoa(k.N.BitLen())
 	case *ecdsa.PublicKey:
@@ -393,7 +507,7 @@ func parseCert(c x509.Certificate) FullCert {
 	hash := h.Sum(nil)
 	sig := SignatureString(c.SignatureAlgorithm)
 	if DebugSet == true {
-		log.Printf("cert's key is: %v", keyVal)
+		log.Printf("[cert] DEBUG - cert's key is: %v", keyVal)
 	}
 	rCert := FullCert{
 		Subject:            parseName(c.Subject), // pkix.Name, country, org, ou, l, p, street, zip, serial, cn, extra... Additional elements in a DN can be added in via ExtraName, <=EMAIL
@@ -406,6 +520,12 @@ func parseCert(c x509.Certificate) FullCert {
 		Extensions:         parseExtensions(c),
 	}
 	return rCert
+}
+
+// parseIssuer pass a certificate, like an Issuer, to obtain LiteCert
+func parseIssuer(a x509.Certificate) LiteCert {
+	issuer := LiteCert{Name: parseName(a.Issuer)}
+	return issuer
 }
 
 // createOutput: converts data our interface types to json, that is annotated in var-data

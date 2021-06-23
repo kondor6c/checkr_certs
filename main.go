@@ -15,24 +15,25 @@ func main() {
 	var optCertIn string
 	opts := gatherOpts()
 	dat := decideRoute(opts)
-	pki.Init()
+	pki.DBInit()
 	if opts.ActionSecondary == "debug" {
 		pki.DebugSet = true
 	}
 	if opts.ActionPrimary == "web-ui" || opts.ActionPrimary == "web-server" {
 		mux := http.NewServeMux()
-		mux.HandleFunc("/", dat.MainHandler)
+		mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("./static"))))
+		mux.Handle("/", http.FileServer(http.Dir("./assets")))
+		mux.HandleFunc("/home", dat.MainHandler)
 		mux.HandleFunc("/add", dat.AddHandler)
 		mux.HandleFunc("/view", dat.ViewHandler)
 		mux.HandleFunc("/view/ical", dat.IcalHandler)
 		mux.HandleFunc("/view/cert", dat.ServePemHandler)
 		mux.HandleFunc("/api", dat.RespondJSONHandler)
-		mux.HandleFunc("/api/cert", dat.X509CertHandler)
-		mux.HandleFunc("/api/cert/remote", dat.RemoteURLHandler)
+		mux.HandleFunc("/api/x509", dat.X509CertHandler)
+		mux.HandleFunc("/api/x509/remote", dat.RemoteURLHandler)
 		mux.HandleFunc("/api/key", dat.PrivateKeyHandler)
 		mux.HandleFunc("/edit", dat.EditHandler)
 		mux.HandleFunc("/fetch", dat.FetchHandler)
-		http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 		log.Fatal(http.ListenAndServe(":5000", mux))
 	}
 	fmt.Println(optCertIn)

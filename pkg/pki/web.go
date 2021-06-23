@@ -48,7 +48,7 @@ func (p *PrivateData) ViewHandler(w http.ResponseWriter, r *http.Request) {
 	if p.key != nil {
 		privKey := p.key.(*rsa.PrivateKey)
 		privKeyDigest := GetPublicKeyDigest(privKey.PublicKey)
-		if privKeyDigest == GetPublicKeyDigest(certPubKey) {
+		if bytes.Compare(privKeyDigest, GetPublicKeyDigest(certPubKey)) == 0 {
 			htmlColor = "green"
 		}
 
@@ -63,6 +63,7 @@ func (p *PrivateData) ViewHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *PrivateData) MainHandler(w http.ResponseWriter, r *http.Request) {
+	log.Printf("%s %s %s\n", r.RemoteAddr, r.Method, r.URL)
 
 }
 func (p *PrivateData) formHandler(w http.ResponseWriter, r *http.Request) {

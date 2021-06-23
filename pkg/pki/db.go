@@ -10,82 +10,105 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
+// terminology: Signatures belongs to keys, and they are applied to the thing (certs) that keys act on, fingerprints belong to the key, this is a change, to much of the code and terminology
 var db *sqlx.DB
 
-func Init() { //seriously need to look at this again, what a mess trying to get multiple SQL queries in one variable, the queries are valid but it doesn't like executing them
-	dbPass := os.Getenv("DBPASS")
+func DBInit() { //seriously need to look at this again, what a mess trying to get multiple SQL queries in one variable, the queries are valid but it doesn't like executing them
 	dbUser := os.Getenv("DBUSER")
+	dbPass := os.Getenv("DBPASS")
 	dbHost := os.Getenv("DBHOST")
+	dbPort := os.Getenv("DBPORT")
+	dbName := os.Getenv("DBNAME")
+	dbOpts := os.Getenv("DBOPTS")
+	var dberr error
 	var table_meta = `CREATE TABLE IF NOT EXISTS meta_info (
 		id MEDIUMINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-		host_name text,
-		alternate text,
-		links text,
+		host_name TEXT,
+		alternate TEXT,
+		links TEXT,
 		port_number INT,
-		protocol text,
+		protocol TEXT,
 		added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		source_agent TEXT NOT NULL,
-		tags text,
-		trust_parent text,
+		tags TEXT,
+		trust_parent TEXT,
 		no_record bool DEFAULT FALSE);`
 	var table_key = `CREATE TABLE IF NOT EXISTS public_keys (
 		id BIGINT AUTO_INCREMENT PRIMARY KEY,
-		public_fp text,
-		strength_size text,
+		public_fp TEXT,
+		strength_size TEXT,
 		pem BLOB REFERENCES pem_store (pem_block),
-		key_usage text,
-		fp_hash_type text,
-		algorithm text,
+		key_usage TEXT,
+		fp_hash_type TEXT,
+		algorithm TEXT,
 		added timestamp DEFAULT CURRENT_TIMESTAMP,
 		meta_tx MEDIUMINT REFERENCES meta_info (id) );`
+
 	var table_pem_store = `CREATE TABLE IF NOT EXISTS pem_store (
 		signature VARCHAR(20) PRIMARY KEY,
 		pem_block BLOB,
 		pem_type VARCHAR(60),
 		added timestamp DEFAULT CURRENT_TIMESTAMP,
 		meta_tx MEDIUMINT REFERENCES meta_info (id) );`
-	var table_staple = `CREATE TABLE IF NOT EXISTS stapled ( id BIGINT AUTO_INCREMENT PRIMARY KEY , url text, linked_cert text REFERENCES pub_certs (signature), sig text, checked_status text, added DATETIME DEFAULT NOW(), meta_tx BIGINT REFERENCES meta_info (id) );`
+	var table_staple = `CREATE TABLE IF NOT EXISTS stapled (
+		id BIGINT AUTO_INCREMENT PRIMARY KEY,
+		url TEXT,
+		linked_cert TEXT REFERENCES pub_certs (signature),
+		sig TEXT,
+		checked_status TEXT,
+		added DATETIME DEFAULT NOW(),
+		meta_tx BIGINT REFERENCES meta_info (id) );`
 	var table_issuer = `CREATE TABLE IF NOT EXISTS issuer 
 		( signature VARCHAR(128) PRIMARY KEY,
-		signature_alg text,
-		common_name text,
-		serial_number text,
-		country timestamp,
-		organization text,
-		organizational_unit text,
-		locality text,
-		province text,
-		street_address text,
-		postal_code text,
+		signature_alg TEXT,
+		common_name TEXT,
+		serial_number TEXT,
+		key_fp TEXT REFERENCES public_keys (public_fp), 
+		country TEXT,
+		organization TEXT,
+		organizational_unit TEXT,
+		locality TEXT,
+		province TEXT,
+		street_address TEXT,
+		postal_code TEXT,
 		partial bool,
 		meta_tx BIGINT REFERENCES meta_info (id) );`
-	var table_pub_cert = `CREATE TABLE IF NOT EXISTS public_certificate ( common_name text,
-		serial_number text, 
-		key_fp text REFERENCES public_keys (public_fp), 
+	var table_pub_cert = `CREATE TABLE IF NOT EXISTS public_certificate ( common_name TEXT,
+		serial_number TEXT, 
+		key_fp TEXT REFERENCES public_keys (public_fp), 
 		country VARCHAR(64), 
-		organization text,
-		organizational_unit text, 
-		locality text,
-		province text, 
-		street_address text,
-		postal_code text, 
+		organization TEXT,
+		organizational_unit TEXT, 
+		locality TEXT,
+		province TEXT, 
+		street_address TEXT,
+		postal_code TEXT, 
 		not_before DATETIME,
 		not_after DATETIME,
 		signature VARCHAR(128) PRIMARY KEY,
-		signature_algorithm text,
-		keyUsage JSON,
-		alt_names JSON,
+		signature_algorithm TEXT,
+		keyUsage TEXT,
+		alt_names TEXT,
 		subject_key_id VARCHAR(128),
-		authority_key_id text,
-		non_standard JSON,
+		authority_key_id TEXT,
+		non_standard TEXT,
 		meta_tx MEDIUMINT REFERENCES meta_info (id) ); `
-
-	var dberr error
-	opts := "parseTime=true&interpolateParams=true"
+	if len(dbOpts) < 1 {
+		dbOpts = "parseTime=true&interpolateParams=true&charset=utf8mb4"
+	}
+	if len(dbHost) < 1 {
+		dbOpts = "127.0.0.1"
+	}
+	if len(dbPort) < 1 {
+		dbOpts = "3306"
+	}
+	if len(dbName) < 1 {
+		dbName = "multicheck"
+	}
 	if len(dbPass) < 1 || len(dbUser) < 1 || len(dbHost) < 1 {
 		log.Printf("I don't know how to connect to the database! Please set DBPASS DBUSER and DBHOST")
 	} else {
-		db, dberr = sqlx.Connect("mysql", dbUser+":"+dbPass+"@tcp("+dbHost+")/multicheck"+"?"+opts)
+		db, dberr = sqlx.Connect("mysql", dbUser+":"+dbPass+"@tcp("+dbHost+":"+dbPort+")/multicheck"+"?"+dbOpts)
 		log.Printf("hit %v", string("database table insert"))
 		Catcher(dberr, 10003, "failed to connect to the database")
 	}
@@ -108,26 +131,70 @@ func certLookup(query FullCert) []FullCert {
 	// I wanted to accept an x509.Certificate and log it, but I would need to re-convert (thus do more work) many fields like the sha1
 	var lerr error
 	var look *sqlx.Rows
+	var qPublicCertBASE string = `SELECT common_name,
+		serial_number,
+		key_fp,
+		country,
+		organization,
+		organizational_unit,
+		locality,
+		province,
+		street_address,
+		postal_code,
+		not_before,
+		not_after,
+		signature,
+		signature_algorithm,
+		keyUsage,
+		alt_names,
+		subject_key_id,
+		authority_key_id,
+		nonstandard FROM pub_certs`
+	var qPublicCertSig string = qPublicCertBASE + " WHERE signature = ?"
+	var qPublicCertDate string = qPublicCertBASE + " WHERE not_after >= ? AND not_after <= ?"
+	var qPublicCertKey string = qPublicCertBASE + " WHERE key_fp = ?"
+	var qPublicCertAltName string = qPublicCertBASE + " WHERE sans REGEXP '^(?)'"
+	var qPublicCertAuthorityKey string = qPublicCertBASE + "WHERE signature LIKE ?"
+	var qPublicCertCN string = qPublicCertBASE + ` WHERE (common_name,
+		serial_number,
+		key_fp,
+		country,
+		organization,
+		organizational_unit,
+		locality,
+		province,
+		street_address,
+		postal_code) ILIKE ?`
+	var qPublicCertCAName string = qPublicCertBASE + ` WHERE (common_name,
+		serial_number,
+		key_fp,
+		country,
+		organization,
+		organizational_unit,
+		locality,
+		province,
+		street_address,
+		postal_code) ILIKE ?`
 	var certResults = []FullCert{}
 	if len(query.Signature) > 0 {
-		look, lerr = db.Queryx("SELECT common_name, serial_number, key_fp, country, organization, organizational_unit, locality, province, street_address, postal_code, not_before, not_after, signature, signature_algorithm, keyUsage, alt_names, subject_key_id, authority_key_id, nonstandard FROM pub_certs WHERE signature=?", query.Signature)
+		look, lerr = db.Queryx(qPublicCertSig, query.Signature)
 
 	} else if query.NotAfter.IsZero() && query.NotBefore.IsZero() {
-		look, lerr = db.Queryx("SELECT common_name, serial_number, key_fp, country, organization, organizational_unit, locality, province, street_address, postal_code, not_before, not_after, signature, signature_algorithm, keyUsage, alt_names, subject_key_id, authority_key_id, nonstandard FROM pub_certs WHERE not_after >= ? AND not_after <= ?", query.NotAfter, query.NotBefore)
+		look, lerr = db.Queryx(qPublicCertDate, query.NotAfter, query.NotBefore)
 
 	} else if len(query.Key.PublicFP) > 0 {
-		look, lerr = db.Queryx("SELECT common_name, serial_number, key_fp, country, organization, organizational_unit, locality, province, street_address, postal_code, not_before, not_after, signature, signature_algorithm, keyUsage, alt_names, subject_key_id, authority_key_id, nonstandard FROM pub_certs WHERE key_fp = ?", query.Key.PublicFP)
+		look, lerr = db.Queryx(qPublicCertKey, query.Key.PublicFP)
 
 	} else if len(query.Subject.CommonName) > 0 {
-		look, lerr = db.Queryx("SELECT common_name, serial_number, key_fp, country, organization, organizational_unit, locality, province, street_address, postal_code, not_before, not_after, signature, signature_algorithm, keyUsage, alt_names, subject_key_id, authority_key_id, nonstandard FROM pub_certs WHERE (common_name, serial_number, key_fp, country, organization, organizational_unit, locality, province, street_address, postal_code) ILIKE ?", query.Subject)
+		look, lerr = db.Queryx(qPublicCertCN, query.Subject)
 	} else if len(query.Issuer.Name.CommonName) > 0 {
-		look, lerr = db.Queryx("SELECT common_name, serial_number, key_fp, country, organization, organizational_unit, locality, province, street_address, postal_code, not_before, not_after, signature, signature_algorithm, keyUsage, alt_names, subject_key_id, authority_key_id, nonstandard FROM pub_certs WHERE (common_name, serial_number, key_fp, country, organization, organizational_unit, locality, province, street_address, postal_code) ILIKE ?", query.Issuer)
+		look, lerr = db.Queryx(qPublicCertCAName, query.Issuer)
 
 	} else if len(query.Extensions.Sans) > 0 {
-		look, lerr = db.Queryx("SELECT common_name, serial_number, key_fp, country, organization, organizational_unit, locality, province, street_address, postal_code, not_before, not_after, signature, signature_algorithm, keyUsage, alt_names, subject_key_id, authority_key_id, nonstandard FROM pub_certs WHERE sans REGEXP '^(?)'", strings.Join(query.Extensions.Sans, "|"))
+		look, lerr = db.Queryx(qPublicCertAltName, strings.Join(query.Extensions.Sans, "|"))
 
 	} else if len(query.Extensions.AKI) > 0 {
-		look, lerr = db.Queryx("SELECT common_name, serial_number, key_fp, country, organization, organizational_unit, locality, province, street_address, postal_code, not_before, not_after, signature, signature_algorithm, keyUsage, alt_names, subject_key_id, authority_key_id, nonstandard FROM pub_certs WHERE signature LIKE ?", query.Extensions.AKI)
+		look, lerr = db.Queryx(qPublicCertAuthorityKey, query.Extensions.AKI)
 	} else {
 		log.Printf("No search criteria")
 	}
@@ -141,6 +208,29 @@ func certLookup(query FullCert) []FullCert {
 
 	return certResults
 }
+
+var insertIssuer = `INSERT INTO issuer (common_name,
+			serial_number,
+			country,
+			organization,
+			organizational_unit,
+			locality, province,
+			street_address,
+			postal_code,
+			key_fp,
+			partial,
+			meta_tx) VALUES(:common_name,
+			:serial_number,
+			:country,
+			:organization,
+			:organizational_unit,
+			:locality,
+			:province,
+			:street_address,
+			:postal_code,
+			:fingerprint,
+			:partial,
+			:metaID)`
 
 func recordRemoteCert(fCert x509.Certificate, request JsonInquiry) {
 	// I wanted to accept an x509.Certificate and log it, but I would need to re-convert (thus do more work) many fields like the sha1
@@ -162,24 +252,60 @@ func recordRemoteCert(fCert x509.Certificate, request JsonInquiry) {
 			issuer   LiteCert `db:""`
 		}
 		if len(pubCert.Extensions.AKI) > 1 {
+			// record the issuer, basing of the authority key identifier remember issuers use LiteCert
 			db.QueryRowx("SELECT COUNT(*) FROM issuer WHERE public_fp = ?", pubCert.Extensions.AKI).Scan(&issuerCount)
 			if issuerCount >= 1 {
-				_, err := ins.NamedExec("INSERT INTO issuer (common_name, serial_number, country, organization, organizational_unit, locality, province, street_address, postal_code, key_fp, partial, meta_tx) VALUES(:common_name, :serial_number, :country, :organization, :organizational_unit, :locality, :province, :street_address, :postal_code, :public_fp, :partial,:metaID)", insertCert{issuer: LiteCert{Name: pubCert.Issuer.Name}, parentCA: pubCert.Extensions.AKI, metaTX: metaID})
-				Catcher(err, 10006, "internal error when trying to record the certificate, this should be ignored by the end user")
+				_, err := ins.NamedExec(insertIssuer, insertCert{issuer: LiteCert{Name: pubCert.Issuer.Name}, parentCA: pubCert.Extensions.AKI, metaTX: metaID})
+				Catcher(err, 10806, "internal error when trying to record the certificate, this should be ignored by the end user")
 			}
 		}
 		ins.Exec(insert_key, pubCert.Key.PublicFP, pubCert.Key.Strength, pubCert.Key.PEM, pubCert.Key.KeyRole, pubCert.Key.FPdigest, pubCert.Key.Algorithm, metaID)
 
 		//ins.Exec("SELECT meta_tx FROM public_keys WHERE public_fp = :public_fp", pubCert.Key.FPdigest)
-		_, err := ins.NamedExec("INSERT INTO public_certificate (common_name, serial_number, country, organization, organizational_unit, locality, province, street_address, postal_code, key_fp, not_before, not_after, signature, signature_algorithm, keyUsage, alt_names, subject_key_id, authority_key_id, non_standard) VALUES(:common_name, :serial_number, :country, :organization, :organizational_unit, :locality, :province, :street_address, :postal_code,:public_fp, :not_before, :not_after, :signature, :signature_algorithm, :key_role, :alt_names, :subject_key_id, :authority_key_id, :non_standard_data)", pubCert)
-		Catcher(err, 10007, "internal error when trying to record the certificate, this should be ignored by the end user")
+		var insertPublic = `INSERT INTO public_certificate (common_name,
+			serial_number,
+			country,
+			organization,
+			organizational_unit,
+			locality,
+			province,
+			street_address,
+			postal_code,
+			not_before,
+			not_after,
+			signature,
+			signature_algorithm,
+			keyUsage,
+			alt_names,
+			subject_key_id,
+			authority_key_id,
+			non_standard) VALUES(:common_name,
+			:serial_number,
+			:country,
+			:organization,
+			:organizational_unit,
+			:locality,
+			:province,
+			:street_address,
+			:postal_code,
+			:not_before,
+			:not_after,
+			:signature,
+			:signature_algorithm,
+			:key_role,
+			:alt_names,
+			:subject_key_id,
+			:authority_key_id,
+			:non_standard_data)`
+		_, err := ins.NamedExec(insertPublic, pubCert)
+		Catcher(err, 10807, "internal error when trying to record the certificate, this should be ignored by the end user")
 		dberr := ins.Commit()
 		if dberr != nil {
-			Catcher(dberr, 10008, "internal error when trying to record the certificate, this should be ignored by the end user")
+			Catcher(dberr, 10808, "internal error when trying to insert the Public certificate, this should be ignored by the end user")
 			ins.Rollback()
 		}
 	} else {
-		log.Printf("failed to record meta transaction information, database connection potentially down")
+		log.Printf("failed to record meta transaction information, database connection potentially down. count: %d, meta: %d, err: %s", count, metaID, err)
 	}
 }
 
@@ -191,10 +317,10 @@ func recordIssuer(caSent []*x509.Certificate) {
 		if caSent[i].IsCA && caCount <= 0 {
 			var issuerCount int
 			if len(caCert.Extensions.AKI) > 1 {
-				db.QueryRowx("SELECT COUNT(*) FROM issuer WHERE public_fp = ?", caCert.Extensions.AKI).Scan(&issuerCount)
+				db.QueryRowx("SELECT COUNT(*) FROM issuer WHERE key_fp = ?", caCert.Extensions.AKI).Scan(&issuerCount) // WHERE key_fp
 				if issuerCount >= 1 {
-					_, err := db.NamedExec("INSERT INTO issuer (common_name, serial_number, country, organization, organizational_unit, locality, province, street_address, postal_code, key_fp ) VALUES(:common_name, :serial_number, :country, :organization, :organizational_unit, :locality, :province, :street_address, :postal_code, :fingerprint)", caCert)
-					Catcher(err, 10009, "internal error when trying to record the CA, this should be ignored by the end user")
+					_, err := db.NamedExec(insertIssuer, caCert)
+					Catcher(err, 10809, "internal error when trying to record the CA, this should be ignored by the end user")
 				}
 			}
 		}

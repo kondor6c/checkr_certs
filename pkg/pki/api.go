@@ -3,6 +3,7 @@ package pki
 import (
 	"bytes"
 	"encoding/json"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"strconv"
@@ -28,19 +29,22 @@ func (p *PrivateData) RemoteURLHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Credentials", "true")
 	var inquiry JsonInquiry
+	full, rerr := ioutil.ReadAll(r.Body)
 	defer r.Body.Close()
+	Catcher(rerr, 62, "error reading request contents (JSON), this is most likely a user error, check the request")
+	buffed := bytes.NewBuffer(full)
+	err := json.NewDecoder(buffed).Decode(&inquiry)
+	Catcher(err, 63, "error at json, this is most likely a user error, check the request")
 	if DebugSet == true {
-		buf := new(bytes.Buffer)
-		buf.ReadFrom(r.Body)
-		log.Printf("here's what we got:")
-		log.Println(buf.String())
+		log.Printf("Debug set, remember TLS keys are being written to /tmp here's what we got:")
+		log.Println(buffed)
 	}
-
-	if err := json.NewDecoder(r.Body).Decode(&inquiry); err != nil {
-		log.Println("error at json, TODO correctly handle this! ")
-		WebCatcher(w, err)
-		return
-	}
+	//teststr := `{ "hostname": "youtube.com", "port": 443, "protocol": "tcp", "Service": "x509", "type": "view", "category": "remoteCert"}`
+	//newerr := json.NewDecoder(strings.NewReader(teststr)).Decode(&inquiry)
+	//Catcher(newerr, 61, "error at json, this is most likely a user error, check the request")
+	log.Println(inquiry)
+	jerr := json.Unmarshal(full, &inquiry)
+	Catcher(jerr, 63, "error at json, this is most likely a user error, check the request")
 	strPort := strconv.Itoa(inquiry.Port)
 	log.Printf("host %v   port %v", inquiry.Hostname, strPort)
 
@@ -50,7 +54,7 @@ func (p *PrivateData) RemoteURLHandler(w http.ResponseWriter, r *http.Request) {
 	jsonOutput := createOutput(p.cert)
 	log.Printf("%v", string(jsonOutput))
 	w.Write(jsonOutput)
-	if len(rCert) > 1 {
+	if len(rCert) >= 1 {
 		go recordIssuer(rCert) // This would be nice to make concurrent!!
 	}
 	recordRemoteCert(p.cert, inquiry)
@@ -114,6 +118,7 @@ https://github.com/agola-io/agola/blob/master/internal/services/runservice/api/a
 // easy, better is the http
 func WebCatcher(w http.ResponseWriter, err error) {
 	if err != nil {
+		//Catcher(err)
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte("error"))
 		http.Error(w, err.Error(), http.StatusInternalServerError)
